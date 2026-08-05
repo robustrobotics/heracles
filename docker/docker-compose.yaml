@@ -50,8 +50,6 @@ services:
       HERACLES_NEO4J_URI: neo4j://neo4j:7683
       HERACLES_OPENAI_API_KEY: $HERACLES_OPENAI_API_KEY
       HERACLES_AGENTS_PATH: /heracles_agents
-      ADT4_HERACLES_IP: neo4j
-      ADT4_HERACLES_PORT: 7683
     networks: [heracles_net]
     extra_hosts: [host.docker.internal:host-gateway]
     stdin_open: true
