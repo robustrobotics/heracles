@@ -8,6 +8,8 @@ from heracles_agents.dsg_interfaces import HeraclesDsgInterface
 from heracles_ros_interfaces.srv import UpdateHoldingState
 from rclpy.node import Node
 
+from heracles_ros.map_state import bump_map_version
+
 
 class HeraclesStateUpdater(Node):
     def __init__(self):
@@ -74,14 +76,23 @@ class HeraclesStateUpdater(Node):
             if is_holding:
                 response.success = robot_hold_obj(db, self.robot_name, object_id)
             else:
-                robot_pose = self._get_robot_pose()
-                if robot_pose is None:
+                if request.has_position:
+                    p = request.position
+                    put_at = (p.x, p.y, p.z)
+                else:
+                    robot_pose = self._get_robot_pose()
+                    put_at = None if robot_pose is None else robot_pose[:3]
+                if put_at is None:
                     response.success = False
                 else:
-                    x, y, z, _, _, _, _ = robot_pose
-                    last_pos_success = set_obj_center(db, object_id, x, y, z)
+                    # Release first. While HOLDS exists, the holding rule in
+                    # dsg_updater keeps snapping the object back onto the
+                    # robot, and could undo a position written before it.
                     unhold_success = robot_unhold_obj(db, self.robot_name, object_id)
+                    last_pos_success = set_obj_center(db, object_id, *put_at)
                     response.success = last_pos_success and unhold_success
+            if response.success:
+                bump_map_version(db)
 
         if response.success:
             self.get_logger().info(
