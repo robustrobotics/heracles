@@ -9,6 +9,9 @@ from heracles_ros_interfaces.srv import UpdateHoldingState
 from rclpy.node import Node
 
 from heracles_ros.map_state import bump_map_version
+from heracles_ros.scene_change import MOVED, object_center
+from heracles_ros.scene_change_writer_node import applied_msg
+from heracles_ros_interfaces.msg import SceneChangeMsg
 
 
 class HeraclesStateUpdater(Node):
@@ -39,6 +42,12 @@ class HeraclesStateUpdater(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         self.timer = self.create_timer(1.0 / self.publish_rate, self.timer_callback)
+
+        # This robot's own placements, announced like any other scene change so
+        # a planner can tell them from changes it did not cause.
+        self.applied_pub = self.create_publisher(
+            SceneChangeMsg, "~/scene_changes_applied", 10
+        )
 
         self.holding_srv = self.create_service(
             UpdateHoldingState,
@@ -85,6 +94,7 @@ class HeraclesStateUpdater(Node):
                 if put_at is None:
                     response.success = False
                 else:
+                    was_at = object_center(db, object_id)
                     # Release first. While HOLDS exists, the holding rule in
                     # dsg_updater keeps snapping the object back onto the
                     # robot, and could undo a position written before it.
@@ -92,7 +102,17 @@ class HeraclesStateUpdater(Node):
                     last_pos_success = set_obj_center(db, object_id, *put_at)
                     response.success = last_pos_success and unhold_success
             if response.success:
-                bump_map_version(db)
+                version = bump_map_version(db)
+                if not is_holding:
+                    self.applied_pub.publish(
+                        applied_msg(
+                            f"executor/{self.robot_name}",
+                            version,
+                            [{"kind": MOVED, "symbol": object_id, "old": was_at,
+                              "new": tuple(put_at)}],
+                            self.get_clock().now().to_msg(),
+                        )
+                    )
 
         if response.success:
             self.get_logger().info(
