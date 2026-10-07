@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
+import os
 
 import numpy as np
 import rclpy
@@ -69,11 +70,18 @@ class HeraclesPublisher(Node):
         self.declare_parameter("seed_dsg_path", "")
         seed_path = self.get_parameter("seed_dsg_path").value
         if self.get_parameter("seed_on_start").value:
-            assert seed_path, "seed_on_start needs seed_dsg_path"
-            version = seed_db(self.URI, self.AUTH, seed_path)
-            self.get_logger().info(
-                f"Seeded Neo4j from {seed_path} (map_version={version})"
-            )
+            if seed_path and os.path.isfile(seed_path):
+                version = seed_db(self.URI, self.AUTH, seed_path)
+                self.get_logger().info(
+                    f"Seeded Neo4j from {seed_path} (map_version={version})"
+                )
+            else:
+                # Without a map file, keep whatever Neo4j already holds rather
+                # than dying and publishing no map at all.
+                self.get_logger().error(
+                    f"Not seeding Neo4j: no scene graph at '{seed_path}'. Is the "
+                    "prior map set (run-adt4 -p)? Publishing what Neo4j already holds."
+                )
 
         self.db = Neo4jWrapper(
             self.URI, self.AUTH, atomic_queries=True, print_profiles=False
