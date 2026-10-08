@@ -67,8 +67,7 @@ def _holding_call(db, is_holding, object_id, position=None, robot_pose=None):
             username=NS(get_secret_value=lambda: AUTH[0]),
             password=NS(get_secret_value=lambda: AUTH[1]),
         ),
-        robot_name=ROBOT,
-        _get_robot_pose=lambda: robot_pose,
+        _get_robot_pose=lambda name: robot_pose,
         get_logger=lambda: NS(info=lambda *_: None, error=lambda *_: None),
     )
     req = UpdateHoldingState.Request()
@@ -77,7 +76,7 @@ def _holding_call(db, is_holding, object_id, position=None, robot_pose=None):
         req.has_position = True
         req.position = Point(x=position[0], y=position[1], z=position[2])
     return HeraclesStateUpdater.update_holding_state_callback(
-        updater, req, UpdateHoldingState.Response()
+        updater, ROBOT, req, UpdateHoldingState.Response()
     ).success
 
 
