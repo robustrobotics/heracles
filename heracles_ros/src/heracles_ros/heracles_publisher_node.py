@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 
 import numpy as np
 import rclpy
@@ -9,6 +10,7 @@ import spark_dsg
 from heracles.dsg_utils import summarize_dsg
 from heracles.graph_interface import db_to_spark_dsg
 from heracles.query_interface import Neo4jWrapper
+from neo4j import GraphDatabase
 from rclpy.node import Node
 
 from heracles_ros.hydra_python_publisher import DsgPublisher
@@ -61,6 +63,7 @@ class HeraclesPublisher(Node):
             self.get_parameter("heracles_neo4j_pass").get_parameter_value().string_value
         )
         self.AUTH = (user, pw)
+        self._wait_for_neo4j()
 
         # Load a scene graph into the database before publishing anything, so
         # Neo4j can be the only map: the JSON is just what fills it at startup.
@@ -102,7 +105,32 @@ class HeraclesPublisher(Node):
             self.get_parameter("version_poll_period_s").value, self.poll_db
         )
 
+    def _wait_for_neo4j(self):
+        """Neo4j often starts together with this node: wait rather than die."""
+        while True:
+            try:
+                with GraphDatabase.driver(self.URI, auth=self.AUTH) as driver:
+                    driver.verify_connectivity()
+                return
+            except Exception as ex:
+                self.get_logger().warn(
+                    f"Waiting for Neo4j at {self.URI}: {ex}",
+                    throttle_duration_sec=10.0,
+                )
+                time.sleep(2.0)
+
     def poll_db(self):
+        # A Neo4j hiccup must not kill the node: restarting it would reseed and
+        # wipe the map. Skip this tick; the driver reconnects on its own.
+        try:
+            self._poll_db()
+        except Exception as ex:
+            self.get_logger().error(
+                f"Neo4j unavailable, map not published: {ex}",
+                throttle_duration_sec=5.0,
+            )
+
+    def _poll_db(self):
         version = get_map_version(self.db)
         now = self.get_clock().now()
         stale = (

@@ -78,6 +78,30 @@ class HeraclesStateUpdater(Node):
         object_id = request.id
         is_holding = request.is_holding
 
+        try:
+            self._update_holding_state(robot_name, request, response)
+        except Exception as ex:
+            # Answer the executor rather than dying with Neo4j.
+            self.get_logger().error(f"Neo4j unavailable: {ex}")
+            response.success = False
+
+        if response.success:
+            self.get_logger().info(
+                f"Successfully set holding state: robot={robot_name}, "
+                f"object={object_id}, is_holding={is_holding}"
+            )
+        else:
+            self.get_logger().error(
+                f"Failed to set holding state: robot={robot_name}, "
+                f"object={object_id}, is_holding={is_holding}"
+            )
+
+        return response
+
+    def _update_holding_state(self, robot_name, request, response):
+        object_id = request.id
+        is_holding = request.is_holding
+
         with Neo4jWrapper(
             self.dsgdb_conf.uri,
             (
@@ -108,24 +132,18 @@ class HeraclesStateUpdater(Node):
             if response.success:
                 bump_map_version(db)
 
-        if response.success:
-            self.get_logger().info(
-                f"Successfully set holding state: robot={robot_name}, "
-                f"object={object_id}, is_holding={is_holding}"
-            )
-        else:
-            self.get_logger().error(
-                f"Failed to set holding state: robot={robot_name}, "
-                f"object={object_id}, is_holding={is_holding}"
-            )
-
-        return response
-
     def timer_callback(self):
         for name in self.robot_names:
             robot_pose = self._get_robot_pose(name)
-            if robot_pose is not None:
+            if robot_pose is None:
+                continue
+            try:
                 self._write_robot_pose(name, robot_pose)
+            except Exception as ex:
+                self.get_logger().error(
+                    f"Neo4j unavailable, {name}'s pose not written: {ex}",
+                    throttle_duration_sec=5.0,
+                )
 
     def _write_robot_pose(self, robot_name, robot_pose):
         x, y, z, qw, qx, qy, qz = robot_pose
