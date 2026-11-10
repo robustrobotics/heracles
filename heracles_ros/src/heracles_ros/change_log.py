@@ -30,7 +30,7 @@ import json
 import time
 from typing import Iterable, List, Optional
 
-from heracles_ros.map_state import reloading_map
+from heracles_ros.map_state import _Transaction, reloading_map
 from heracles_ros.scene_change import (
     ADDED,
     MOVED,
@@ -56,7 +56,9 @@ def ensure_schema(db) -> None:
     The constraint outlives wipes of the data (it is schema). Creating it fails
     if the log already has repeated seqs; record then still works, unguarded.
     """
-    if getattr(db, "_scene_change_schema", False):
+    if getattr(db, "_scene_change_schema", False) or isinstance(db, _Transaction):
+        # (in a transaction that writes, Neo4j refuses schema changes and
+        # fails the transaction: map_edit makes the schema before it)
         return
     try:
         db.execute(

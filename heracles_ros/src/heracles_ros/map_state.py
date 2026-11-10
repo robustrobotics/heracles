@@ -105,9 +105,15 @@ def map_edit(db):
     if driver is None:
         yield None if is_rebuilding(db) else db
         return
+    # The change log's schema cannot be made in a transaction that writes
+    # (Neo4j refuses it, and the transaction fails): make it first, on its own.
+    from heracles_ros.change_log import ensure_schema
+
+    ensure_schema(db)
     with driver.session(database=db.db_name) as session:
         with session.begin_transaction() as tx:
             t = _Transaction(tx)
+            t._scene_change_schema = True
             t.execute(f"MERGE (m:{_MAP_STATE}) SET m.edits = coalesce(m.edits, 0) + 1")
             if is_rebuilding(t):
                 yield None

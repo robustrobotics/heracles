@@ -58,6 +58,9 @@ def db():
     if not os.path.exists(DSG_PATH):
         pytest.skip(f"No test scene graph at {DSG_PATH}")
     probe = _connect()
+    # Each test starts from an empty database: a reseed keeps robots, what
+    # they hold and the version count, which would carry over between tests.
+    probe.query("MATCH (n) DETACH DELETE n")
     probe.close()
     seed_db(URI, AUTH, DSG_PATH)
     db = _connect()
