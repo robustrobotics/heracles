@@ -147,6 +147,8 @@ class _Writer:
     _on_snapshot = SceneChangeWriter._on_snapshot
     _wanted = SceneChangeWriter._wanted
     _can_rebuild = SceneChangeWriter._can_rebuild
+    _prior_problem = SceneChangeWriter._prior_problem
+    _rebuild_log = SceneChangeWriter._rebuild_log
     _rebuild = SceneChangeWriter._rebuild
     _announce = SceneChangeWriter._announce
 

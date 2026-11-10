@@ -14,28 +14,41 @@ the published graph. Two things do:
 Both are written into the graph's metadata under ``METADATA_KEY``. Robot pose
 updates do not bump the version: they are not changes to the map.
 
-While the change log rebuilds the map (change_log.rebuild), the map nodes are
-briefly gone or half written. ``rebuilding`` marks that time, so the publisher
-holds the last map instead of publishing a partial one, and editors wait.
+A third, ``map_epoch`` (also in the metadata), is a new id written on every full load (seed_db, or
+heracles.utils.load_dsg_to_db, which wipes the database). The version keeps
+counting up through a load, but a planner should compare (epoch, version):
+the same version on a different epoch is a different map.
+
+While the change log rebuilds the map (change_log.rebuild) or a load replaces
+it, the map nodes are briefly gone or half written. ``rebuilding`` marks that
+time, so the publisher holds the last map instead of publishing a partial one,
+and editors wait. Any other loader should wrap its load in ``reloading_map``
+(heracles.map_reload), which also keeps robots, holding and the version.
 """
 
 from __future__ import annotations
 
-import os
 import time
 from typing import Dict, List
 
 import spark_dsg
+from heracles.map_reload import (  # noqa: F401  re-exported for map writers
+    REBUILD_STALE_S,
+    get_map_epoch,
+    get_map_version,
+    is_rebuilding,
+    mark_rebuild_failed,
+    rebuild_state,
+    reloading_map,
+    set_rebuilding,
+)
 from heracles.query_interface import Neo4jWrapper
 from heracles.utils import load_dsg_to_db
 
 METADATA_KEY = "heracles"
 _MAP_STATE = "_MapState"
-
-
-def get_map_version(db) -> int:
-    rows = db.query(f"MATCH (m:{_MAP_STATE}) RETURN m.version AS v")
-    return int(rows[0]["v"]) if rows and rows[0]["v"] is not None else 0
+# The console's own change counter, where it runs (see notify_map_change).
+_CONSOLE_STATE = "_State"
 
 
 def bump_map_version(db) -> int:
@@ -47,22 +60,20 @@ def bump_map_version(db) -> int:
     return int(rows[0]["v"])
 
 
-# A rebuild marked longer ago than this is taken as abandoned (its writer died
-# mid-rebuild): the map is published again rather than held for ever.
-REBUILD_STALE_S = 120.0
+def notify_map_change(db) -> int:
+    """Bump the map version, and the console's counter if there is one.
 
-
-def set_rebuilding(db, rebuilding: bool) -> None:
+    For every edit of the map: the publisher and planners watch the version,
+    the console's viewers poll its ``_State`` node. That node is only matched,
+    never created, so without a console this is bump_map_version.
+    """
+    version = bump_map_version(db)
     db.execute(
-        f"MERGE (m:{_MAP_STATE}) SET m.rebuilding_since = $t",
-        t=time.time() if rebuilding else None,
+        f"MATCH (s:{_CONSOLE_STATE}) "
+        "SET s.version = coalesce(s.version, 0) + 1, s.updated = $t",
+        t=time.time(),
     )
-
-
-def is_rebuilding(db) -> bool:
-    rows = db.query(f"MATCH (m:{_MAP_STATE}) RETURN m.rebuilding_since AS t")
-    since = rows[0]["t"] if rows else None
-    return since is not None and time.time() - float(since) < REBUILD_STALE_S
+    return version
 
 
 def get_holding(db) -> Dict[str, List[str]]:
@@ -80,37 +91,35 @@ def map_metadata(db) -> dict:
     return {
         METADATA_KEY: {
             "map_version": get_map_version(db),
+            "map_epoch": get_map_epoch(db),
             "holding": get_holding(db),
         }
     }
 
 
 def seed_db(uri: str, auth: tuple, dsg_path: str) -> int:
-    """Replace the database contents with the scene graph at ``dsg_path``.
+    """Replace the map in the database with the scene graph at ``dsg_path``.
 
-    Wipes everything first, including ``HOLDS`` edges, robot poses and the
-    version counter, so it is only for the start of a run. The version is then
-    bumped once, so a fresh map is never confused with "no map yet" (0).
+    load_dsg_to_db wipes the map and the change log, but keeps what is not the
+    map (heracles.map_reload): robots and what they hold (if the new map still
+    has the object), and the version, which goes on to max(old)+1, so a fresh
+    map is never confused with "no map yet" (0) nor with the map before it. The
+    map gets a new epoch and records dsg_path as the original rebuilds start
+    from. Returns the new version.
     """
     load_dsg_to_db(
         uri, auth, spark_dsg.DynamicSceneGraph.load(dsg_path), source_file_path=dsg_path
     )
     with Neo4jWrapper(uri, auth, atomic_queries=True, print_profiles=False) as db:
-        # The original the change log rebuilds from: only a map that was seeded
-        # from a file can be rebuilt from it.
-        db.execute(
-            f"MERGE (m:{_MAP_STATE}) SET m.prior_path = $p",
-            p=os.path.abspath(dsg_path),
-        )
-        return bump_map_version(db)
+        return get_map_version(db)
 
 
 def get_prior_path(db) -> str:
-    """The scene graph file the map was seeded from ("" if it was not).
+    """The scene graph file the map was loaded from ("" if it was not).
 
-    seed_db records it in _MapState. A map loaded from a file some other way
-    (load_dsg_to_db with source_file_path, a console reload) records only the
-    _GraphMetadata source, so fall back to that.
+    load_dsg_to_db (and so seed_db) records it in _MapState. A map loaded from
+    a file some other way, e.g. a loader that wiped _MapState too, may record
+    only the _GraphMetadata source, so fall back to that.
     """
     rows = db.query(f"MATCH (m:{_MAP_STATE}) RETURN m.prior_path AS p")
     path = (rows[0]["p"] or "") if rows else ""
