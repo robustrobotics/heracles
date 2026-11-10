@@ -227,7 +227,7 @@ class _Writer:
     _on_new_changes = _on_snapshot
 
 
-def _msg(source="awcd/euclid"):
+def _msg(source="awcd/testbot_b"):
     return NS(source=source, changes=[])
 
 
@@ -235,8 +235,8 @@ def test_changes_during_a_reload_are_queued_then_applied(monkeypatch):
     rebuilding = [True]
     monkeypatch.setattr(writer_node, "is_rebuilding", lambda db: rebuilding[0])
     w = _Writer()
-    w.on_changes(_msg("awcd/euclid"))
-    w.on_changes(_msg("executor/hamilton"))
+    w.on_changes(_msg("awcd/testbot_b"))
+    w.on_changes(_msg("executor/testbot_a"))
     assert w.applied == [] and len(w._queued) == 2
     w._drain_queued()  # still reloading: wait
     assert w.applied == []
@@ -244,8 +244,8 @@ def test_changes_during_a_reload_are_queued_then_applied(monkeypatch):
     w.on_changes(_msg("sget/chat"))  # behind the queue, not before it
     w._drain_queued()
     assert [m.source for m in w.applied] == [
-        "awcd/euclid",
-        "executor/hamilton",
+        "awcd/testbot_b",
+        "executor/testbot_a",
         "sget/chat",
     ]
 

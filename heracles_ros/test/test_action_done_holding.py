@@ -1,6 +1,6 @@
 """Picks and places from /action_done when the holding service call is lost.
 
-The field case: hamilton picked O58 and placed it, both SUCCESS, but its
+The field case: testbot_a picked O58 and placed it, both SUCCESS, but its
 update_holding_state calls never reached the base, so the map kept O58 where
 it was picked. The state updater now also reads the action reports. The map
 is faked (the dsg_updater and scene_change calls it makes), so no Neo4j.
@@ -78,7 +78,7 @@ def _updater(world, robot_pose=None):
         error=lambda s, **_: lines.append(("error", s)),
     )
     u = NS(
-        robot_names=["hamilton", "euclid"],
+        robot_names=["testbot_a", "testbot_b"],
         _action_types=(msgs.ActionMsg.PICK, msgs.ActionMsg.PLACE),
         dsgdb_conf=NS(
             uri="neo4j://fake",
@@ -110,7 +110,7 @@ def _updater(world, robot_pose=None):
     return u
 
 
-def _done(action, obj="O58", robot="hamilton", points=(), success=True):
+def _done(action, obj="O58", robot="testbot_a", points=(), success=True):
     msg = msgs.ActionDoneMsg()
     msg.robot_name, msg.action_type, msg.object_id = robot, action, obj
     msg.success = success
@@ -133,7 +133,7 @@ T2249 = (-51.66, 76.61, 0.0)
 def test_pick_and_place_results_move_the_object_without_the_service(world):
     u = _updater(world)
     u.action_done_callback(_done("PICK"))
-    assert world.holds == {"O58": "hamilton"} and world.version == 5
+    assert world.holds == {"O58": "testbot_a"} and world.version == 5
     u.action_done_callback(_done("PLACE", points=[T2249]))
     assert world.holds == {} and world.objects["O58"] == T2249
     assert world.logged == [{"symbol": "O58", "xyz": list(T2249)}]
@@ -150,8 +150,8 @@ def test_a_place_without_a_point_uses_the_robots_pose(world):
 
 def test_the_service_then_the_report_moves_the_object_once(world):
     u = _updater(world)
-    assert _service(u, "hamilton", True).success
-    assert _service(u, "hamilton", False, position=T2249).success
+    assert _service(u, "testbot_a", True).success
+    assert _service(u, "testbot_a", False, position=T2249).success
     v = world.version
     u.action_done_callback(_done("PICK"))  # late report of the pick
     u.action_done_callback(_done("PLACE", points=[T2249]))
@@ -162,10 +162,10 @@ def test_the_service_then_the_report_moves_the_object_once(world):
 def test_the_report_then_the_service_moves_the_object_once(world):
     u = _updater(world)
     u.action_done_callback(_done("PICK"))
-    assert _service(u, "hamilton", True).success  # already held: no bump
+    assert _service(u, "testbot_a", True).success  # already held: no bump
     u.action_done_callback(_done("PLACE", points=[T2249]))
     v = world.version
-    assert _service(u, "hamilton", False, position=T2249).success
+    assert _service(u, "testbot_a", False, position=T2249).success
     assert world.version == v and len(world.logged) == 1
 
 
@@ -173,7 +173,7 @@ def test_failures_other_actions_and_other_robots_are_ignored(world):
     u = _updater(world)
     u.action_done_callback(_done("PICK", success=False))
     u.action_done_callback(_done("FOLLOW"))
-    u.action_done_callback(_done("PICK", robot="gauss"))  # not this updater's
+    u.action_done_callback(_done("PICK", robot="testbot_c"))  # not this updater's
     assert world.holds == {} and world.version == 4
 
 

@@ -115,7 +115,7 @@ def _load(db, objects, fail=False, keep_robots=True):
 
 
 def test_a_reload_is_held_from_start_to_end_and_counts_the_version_on():
-    db = _Db(version=7, robots={"euclid": {"name": "euclid"}}, objects={"O1"})
+    db = _Db(version=7, robots={"testbot_b": {"name": "testbot_b"}}, objects={"O1"})
     _load(db, {"O1", "O2"})
     assert db.log == ["mark", "wipe", "mark", "load", "version 8", "unmark"]
     assert get_map_version(db) == 8 and not is_rebuilding(db)
@@ -140,11 +140,11 @@ def test_a_rebuild_of_the_same_map_keeps_its_epoch():
 
 
 def test_holding_and_robots_survive_a_wipe_that_took_them():
-    pose = {"name": "hamilton", "qw": 1.0}
+    pose = {"name": "testbot_a", "qw": 1.0}
     db = _Db(
         version=2,
-        robots={"hamilton": pose, "euclid": {"name": "euclid"}},
-        holding={"hamilton": ["O58"], "euclid": ["O9"]},
+        robots={"testbot_a": pose, "testbot_b": {"name": "testbot_b"}},
+        holding={"testbot_a": ["O58"], "testbot_b": ["O9"]},
         objects={"O58", "O9"},
     )
     logged = []
@@ -152,9 +152,9 @@ def test_holding_and_robots_survive_a_wipe_that_took_them():
         db.wipe(keep_robots=False)  # a loader that deletes everything
         reload.wiped()
         db.objects = {"O58"}  # the new map has no O9
-    assert db.robots["hamilton"] == pose and "euclid" in db.robots
-    assert db.holding == {"hamilton": ["O58"]}
-    assert any("euclid:O9" in line for line in logged)
+    assert db.robots["testbot_a"] == pose and "testbot_b" in db.robots
+    assert db.holding == {"testbot_a": ["O58"]}
+    assert any("testbot_b:O9" in line for line in logged)
     assert get_map_version(db) == 3  # max(old) + 1, even though _MapState was wiped
 
 
@@ -194,7 +194,7 @@ def test_the_published_metadata_carries_the_epoch():
 
 
 def test_load_dsg_to_db_holds_the_map_and_records_its_file(monkeypatch):
-    db = _Db(version=6, robots={"hilbert": {"name": "hilbert"}}, objects={"O1"})
+    db = _Db(version=6, robots={"testbot_d": {"name": "testbot_d"}}, objects={"O1"})
 
     class _Wrapper:
         def __init__(self, *a, **kw):
@@ -224,7 +224,7 @@ def test_load_dsg_to_db_holds_the_map_and_records_its_file(monkeypatch):
     heracles_utils.load_dsg_to_db("neo4j://x", ("u", "p"), graph, "maps/dsg.json")
     assert db.state["prior_path"].endswith("maps/dsg.json")
     assert get_map_version(db) == 7 and len(get_map_epoch(db)) == 32
-    assert not is_rebuilding(db) and "hilbert" in db.robots
+    assert not is_rebuilding(db) and "testbot_d" in db.robots
 
 
 def test_a_long_load_keeps_renewing_its_mark(monkeypatch):
