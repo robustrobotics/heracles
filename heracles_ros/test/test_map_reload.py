@@ -238,3 +238,62 @@ def test_a_long_load_keeps_renewing_its_mark(monkeypatch):
         time.sleep(0.2)
     assert db.log.count("mark") > 3 and db.log[-1] == "unmark"
     assert not is_rebuilding(db)
+
+
+class _Tx:
+    """A driver, session and transaction recording what an edit ran."""
+
+    def __init__(self, rebuilding_since=None):
+        self.ran, self.committed = [], False
+        self.since = rebuilding_since
+        self.driver = self
+        self.db_name = "neo4j"
+
+    def session(self, database):
+        return self
+
+    def begin_transaction(self):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        pass
+
+    def commit(self):
+        self.committed = True
+
+    def run(self, query, parameters=None, **kw):
+        self.ran.append(query)
+        if "rebuilding_since AS t" in query:
+            return [_Record({"t": self.since, "f": None})]
+        return []
+
+
+class _Record(dict):
+    def data(self):
+        return dict(self)
+
+
+def test_an_edit_locks_the_map_state_then_commits_in_one_transaction():
+    from heracles_ros.map_state import map_edit
+
+    tx = _Tx()
+    with map_edit(tx) as db:
+        assert db is not None
+        db.execute("MATCH (p:MeshPlace {nodeSymbol: $s}) DETACH DELETE p", s="t1")
+    assert "SET m.edits" in tx.ran[0]  # the lock comes first
+    assert "rebuilding_since" in tx.ran[1] and "DETACH DELETE" in tx.ran[2]
+    assert tx.committed
+
+
+def test_an_edit_during_a_rebuild_is_refused_and_writes_nothing():
+    import time
+
+    from heracles_ros.map_state import map_edit
+
+    tx = _Tx(rebuilding_since=time.time())
+    with map_edit(tx) as db:
+        assert db is None
+    assert not tx.committed  # the lock write is rolled back

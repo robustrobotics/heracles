@@ -29,6 +29,7 @@ and editors wait. Any other loader should wrap its load in ``reloading_map``
 from __future__ import annotations
 
 import time
+from contextlib import contextmanager
 from typing import Dict, List
 
 import spark_dsg
@@ -74,6 +75,45 @@ def notify_map_change(db) -> int:
         t=time.time(),
     )
     return version
+
+
+class _Transaction:
+    """A transaction with Neo4jWrapper's execute and query, for map writers."""
+
+    def __init__(self, tx):
+        self.tx = tx
+
+    def execute(self, query, parameters=None, **kwargs):
+        return list(self.tx.run(query, parameters, **kwargs)), None, None
+
+    def query(self, query):
+        return [r.data() for r in self.tx.run(query)]
+
+
+@contextmanager
+def map_edit(db):
+    """One transaction for an edit, its change log entry and its version bump.
+
+    Yields a db to make them with, or None when the map is being rebuilt or
+    reloaded (the edit must not run). The transaction first write-locks
+    _MapState, which every rebuild writes when it starts (set_rebuilding):
+    an edit and the start of a rebuild therefore never overlap, and two edits
+    run one after the other. Nothing is written if the body raises.
+    A db without a driver (a test fake) is used as it is.
+    """
+    driver = getattr(db, "driver", None)
+    if driver is None:
+        yield None if is_rebuilding(db) else db
+        return
+    with driver.session(database=db.db_name) as session:
+        with session.begin_transaction() as tx:
+            t = _Transaction(tx)
+            t.execute(f"MERGE (m:{_MAP_STATE}) SET m.edits = coalesce(m.edits, 0) + 1")
+            if is_rebuilding(t):
+                yield None
+                return
+            yield t
+            tx.commit()
 
 
 def get_holding(db) -> Dict[str, List[str]]:
